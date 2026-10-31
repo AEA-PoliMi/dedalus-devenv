@@ -1,0 +1,22 @@
+# Override for Docker Desktop (Windows / macOS), where network_mode: host and
+# the CARLA container are not available (keep COMPOSE_PROFILES empty).
+# Run CARLA natively on the host and use:
+#   docker compose -f compose.yml -f compose.desktop.yml up -d
+# The ros2 container reaches the native CARLA through host.docker.internal.
+
+services:
+
+  ros2:
+    depends_on: !reset []
+    network_mode: bridge
+    ipc: !reset null
+    ports:
+      - "8765:8765"             # foxglove_bridge
+    environment:
+      CARLA_HOST: host.docker.internal
+      DISPLAY: !reset null
+    volumes: !override
+      - ${WS_PATH:-./ws}:/ws
+      - ${BAGS_PATH:-./bags}:/bags
+      - ./smoke:/smoke:ro
+    deploy: !reset null

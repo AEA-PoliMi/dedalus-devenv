@@ -1,0 +1,6 @@
+.env
+ws/
+bags/
+build/
+install/
+log/

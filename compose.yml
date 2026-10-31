@@ -1,0 +1,71 @@
+# DEDALUS environment: CARLA simulator + ROS 2 Jazzy dev container.
+# Linux only as written (network_mode: host). On Docker Desktop (Windows/macOS)
+# add the override file:  docker compose -f compose.yml -f compose.desktop.yml up -d
+#
+# Settings come from .env (copy .env.example). This file contains no project
+# code; the workspace is bind-mounted from WS_PATH.
+
+services:
+
+  carla:
+    # One CARLA per machine. Only started when the "sim" profile is enabled
+    # (COMPOSE_PROFILES=sim in .env, or: docker compose --profile sim up -d).
+    profiles: ["sim"]
+    image: carlasim/carla:${CARLA_VERSION:-0.9.16}
+    command: bash CarlaUE4.sh -RenderOffScreen -nosound -quality-level=Epic
+    network_mode: host          # RPC on localhost:2000, streaming on 2001
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      DISPLAY: ${DISPLAY:-}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Ready when CARLA is listening on :2000 (0x07D0, state 0A = LISTEN in
+    # /proc/net/tcp). Passive on purpose: a bare TCP connect-and-close on the RPC
+    # port can crash the 0.9.16 server ("close: Bad file descriptor", SIGSEGV).
+    healthcheck:
+      test: ["CMD", "bash", "-c", "grep -qE ':07D0 00000000:0000 0A' /proc/net/tcp"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 36               # up to ~3 min after start_period
+
+  ros2:
+    build:
+      context: ./docker/ros2
+    image: dedalus-devenv:jazzy
+    # Optional dependency: with the sim profile enabled, ros2 waits until CARLA
+    # answers on :2000; without it, ros2 starts alone (teammates, bag replay).
+    depends_on:
+      carla:
+        condition: service_healthy
+        required: false
+    network_mode: host          # localhost:2000 to CARLA, foxglove_bridge on 8765
+    ipc: host                   # Fast DDS shared memory between containers
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    working_dir: /ws
+    stdin_open: true            # keep `bash` alive; attach with: docker compose exec ros2 bash
+    tty: true
+    environment:
+      HOME: /home/ubuntu
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-7}
+      CARLA_HOST: ${CARLA_HOST:-localhost}
+      DISPLAY: ${DISPLAY:-}
+    volumes:
+      - ${WS_PATH:-./ws}:/ws
+      - ${BAGS_PATH:-./bags}:/bags
+      - ./smoke:/smoke:ro         # stand-alone CARLA smoke test (not part of the image)
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
